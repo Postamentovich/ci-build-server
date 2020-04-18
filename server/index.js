@@ -5,7 +5,7 @@ const { errorLog, infoLog } = require('./utils/console-log');
 
 const app = express();
 const controller = new BuildController();
-const PORT = typeof port === 'number' ? port : 7000;
+const PORT = typeof port === 'number' ? port : 8080;
 
 if (apiToken) {
   app.use(express.json());
@@ -28,7 +28,7 @@ if (apiToken) {
     res.sendStatus(200);
   });
 
-  app.listen(PORT, () => infoLog(`App listening at http://localhost:${PORT}`));
+  app.listen(PORT, () => infoLog(`Build server listening at http://localhost:${PORT}`));
 } else {
   errorLog('Please add apiToken in server-conf.json');
 }
