@@ -112,7 +112,7 @@ class BuildController {
     if (agent) {
       try {
         await this.fetchAgentHealth(agent);
-        return true;
+        return agent;
       } catch (error) {
         errorLog(`Build agent at http://${host}:${port} not response`);
         this.deleteAgent(agent);
@@ -139,7 +139,7 @@ class BuildController {
 
       this.buildList = [...this.buildList, ...waitingBuilds];
 
-      infoLog(`Found ${waitingBuilds.length} waiting builds`);
+      infoLog(`Found ${waitingBuilds.length} new waiting builds`);
     } catch (error) {
       infoLog('Error when getting build list. Try in 10 seconds');
     } finally {

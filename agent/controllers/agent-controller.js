@@ -48,7 +48,7 @@ class AgentController {
       await this.run(command);
       infoLog(`Repo ${repoName} successfull clone`);
     } catch (error) {
-      errorLog(`Error when clone Repo ${repoName}`);
+      errorLog(`Clone Repo ${repoName} failed`);
     }
   }
 
@@ -56,23 +56,33 @@ class AgentController {
     return `http://${SERVER_HOST}:${SERVER_PORT}`;
   }
 
-  notifyServer() {
+  async notifyServer() {
     const serverUrl = this.getServerUrl();
     const model = { port: AGENT_PORT, host: AGENT_HOST };
+    infoLog(`Trying notify server`);
     try {
-      axios.post(`${serverUrl}/notify-agent`, model);
+      await axios.post(`${serverUrl}/notify-agent`, model);
+      infoLog(`Agent is waiting new task...`);
     } catch (error) {
-      errorLog(error);
+      errorLog(`Server not response. Another try in 5 seconds`);
+      setTimeout(() => {
+        this.notifyServer();
+      }, 5000);
     }
   }
 
-  notifyServerBuildResult(status, log, buildId) {
+  async notifyServerBuildResult(status, log, buildId) {
     const serverUrl = this.getServerUrl();
     const model = { buildId, status, log };
     try {
-      axios.post(`${serverUrl}/notify-build-result`, model);
+      await axios.post(`${serverUrl}/notify-build-result`, model);
+      infoLog(`Log sent successfully to the server`);
+      await this.notifyServer();
     } catch (error) {
-      errorLog(error);
+      errorLog(`Server not response. Another try in 5 seconds`);
+      setTimeout(() => {
+        this.notifyServerBuildResult(status, log, buildId);
+      }, 5000);
     }
   }
 
@@ -82,11 +92,16 @@ class AgentController {
     try {
       const { stdout } = await this.run(`cd ${this.storageFolderName} && ${buildCommand}`);
 
-      infoLog('Build end successfull');
+      const log = stdout;
 
-      return { log: stdout, status: BUILD_STATUS.SUCCESS };
+      infoLog('Build finish successfull');
+
+      return { log, status: BUILD_STATUS.SUCCESS };
     } catch (error) {
-      errorLog(`Error in building`);
+      const { stdout, stderr } = error;
+      const log = stdout + stderr;
+      errorLog(`Build finish with errors`);
+      return { log, status: BUILD_STATUS.FAIL };
     }
   }
 
@@ -104,10 +119,14 @@ class AgentController {
   }
 
   async build(buildId, repoName, commitHash, buildCommand) {
-    this.buildId = buildId;
+    infoLog('Start new build');
+
     await this.cloneRepo(repoName);
+
     await this.checkout(commitHash);
+
     const { status, log } = await this.buidRepo(buildCommand);
+
     await this.notifyServerBuildResult(status, log, buildId);
   }
 }
