@@ -1,6 +1,6 @@
 const express = require("express");
 const AgentController = require("./controllers/agent-controller");
-const { port } = require('./agent-conf.json');
+const { port } = require("./agent-conf.json");
 const { errorLog, infoLog } = require("./utils/console-log");
 
 const app = express();
@@ -11,7 +11,7 @@ controller.init();
 
 app.use(express.json());
 
-app.post("/build", (req, res) => {
+app.post("/build", async (req, res) => {
   const { buildId, repoName, commitHash, buildCommand } = req.body;
 
   controller.build(buildId, repoName, commitHash, buildCommand);

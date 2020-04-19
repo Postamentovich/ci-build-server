@@ -7,6 +7,11 @@
     "start": "node index.js",
     "dev": "nodemon index.js"
   },
+  "nodemonConfig": {
+    "ignore": [
+      "storage-agent-repo/*"
+    ]
+  },
   "keywords": [],
   "author": "Postamentovich",
   "license": "ISC",

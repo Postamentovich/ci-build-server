@@ -53,6 +53,7 @@ class BuildController {
     try {
       await this.fetchAgentStartBuild(agent, model);
       this.changeBuildAgentStatus(agent, AGENT_STATUS.WORKING);
+      this.fetchStorageBuildStart(buildId);
       infoLog(
         `Build ${buildId} started at agent on http://${agent.host}:${agent.port}`
       );
@@ -77,6 +78,22 @@ class BuildController {
     const { port, host } = agent;
     const url = `http://${host}:${port}/build`;
     axios.post(url, model);
+  }
+
+  async fetchStorageBuildStart(buildId) {
+    await storageAPI.setBuildStart({
+      buildId,
+      dateTime: new Date().toISOString(),
+    });
+  }
+
+  async fetchStorageBuildFinish(buildId, status, log) {
+    await storageAPI.setBuildFinish({
+      buildId,
+      duration: 3000,
+      success: status === BUILD_STATUS.SUCCESS,
+      buildLog: log,
+    });
   }
 
   getWaitingAgent() {
@@ -134,11 +151,18 @@ class BuildController {
 
   addAgent(port, host) {
     infoLog(`Add build agent at http://${host}:${port}`);
-    this.agents.push({ port, host, status: AGENT_STATUS.WAITING });
+    if (this.agents.find((el) => el.port === port && el.host === host)) {
+      this.changeBuildAgentStatus({ port, host }, AGENT_STATUS.WAITING);
+    } else {
+      this.agents.push({ port, host, status: AGENT_STATUS.WAITING });
+    }
   }
 
   addBuildResult(buildId, status, log) {
     infoLog(`Add result for build ${buildId}`);
+    infoLog(`Add result for build ${status}`);
+    infoLog(`Add result for build ${log}`);
+    this.fetchStorageBuildFinish(buildId, status, log);
   }
 }
 
