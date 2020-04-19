@@ -1,30 +1,26 @@
-const { errorLog, infoLog } = require("../utils/console-log");
-const axios = require("axios").default;
-const util = require("util");
-const exec = util.promisify(require("child_process").exec);
-const { port, serverHost, serverPort } = require("../agent-conf.json");
+const { errorLog, infoLog } = require('../utils/console-log');
+const axios = require('axios').default;
+const util = require('util');
+const exec = util.promisify(require('child_process').exec);
+const { port, serverHost, serverPort } = require('../agent-conf.json');
 
-const AGENT_PORT = typeof port === "number" ? port : 8001;
-const AGENT_HOST = "127.0.0.1";
-const SERVER_HOST = typeof serverHost === "string" ? serverHost : "127.0.0.1";
-const SERVER_PORT = typeof serverPort === "number" ? serverPort : 8080;
+const AGENT_PORT = typeof port === 'number' ? port : 8001;
+const AGENT_HOST = '127.0.0.1';
+const SERVER_HOST = typeof serverHost === 'string' ? serverHost : '127.0.0.1';
+const SERVER_PORT = typeof serverPort === 'number' ? serverPort : 8080;
 
 const BUILD_STATUS = {
-  WAITING: "Waiting",
-  IN_PROGRESS: "InProgress",
-  FAIL: "Fail",
-  CANCELED: "Canceled",
-  SUCCESS: "Success",
+  WAITING: 'Waiting',
+  IN_PROGRESS: 'InProgress',
+  FAIL: 'Fail',
+  CANCELED: 'Canceled',
+  SUCCESS: 'Success',
 };
 class AgentController {
   constructor() {
     this.storageFolderName = `storage-agent-repo`;
   }
 
-  /**
-   * Выполнение комманды
-   * @param {string} command
-   */
   async run(command) {
     try {
       return exec(command);
@@ -33,11 +29,8 @@ class AgentController {
     }
   }
 
-  /**
-   * Удаляет локальный репозиторий
-   */
   async removeLocalRepo() {
-    infoLog("Remove local repo");
+    infoLog('Remove local repo');
 
     const command = `rm -rf ${this.storageFolderName}`;
 
@@ -87,11 +80,9 @@ class AgentController {
     infoLog(`Start ${buildCommand}`);
 
     try {
-      const { stdout } = await this.run(
-        `cd ${this.storageFolderName} && ${buildCommand}`
-      );
+      const { stdout } = await this.run(`cd ${this.storageFolderName} && ${buildCommand}`);
 
-      infoLog("Build end successfull");
+      infoLog('Build end successfull');
 
       return { log: stdout, status: BUILD_STATUS.SUCCESS };
     } catch (error) {
@@ -108,7 +99,7 @@ class AgentController {
   }
 
   init() {
-    infoLog("Build agent controller inited");
+    infoLog('Build agent controller inited');
     this.notifyServer();
   }
 
