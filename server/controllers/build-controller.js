@@ -24,6 +24,8 @@ class BuildController {
     this.agents = [];
     // Настройки репозитория
     this.settings = null;
+    // Объект в котором по ключу билда хранятся время начала и конца сборки
+    this.timers = {};
   }
 
   async processBuilds() {
@@ -45,23 +47,33 @@ class BuildController {
 
   async startBuild(build, agent) {
     const { id: buildId, commitHash } = build;
+
     const { repoName, buildCommand } = this.settings;
+
     const model = { buildId, repoName, commitHash, buildCommand };
+
     infoLog(`Trying start build ${buildId} at agent on http://${agent.host}:${agent.port}`);
+
     this.changeBuildAgentStatus(agent, AGENT_STATUS.TRYING);
+
     try {
       await this.fetchAgentStartBuild(agent, model);
+
       this.changeBuildAgentStatus(agent, AGENT_STATUS.WORKING);
-      this.fetchStorageBuildStart(buildId);
+
+      await this.fetchStorageBuildStart(buildId);
+
       infoLog(`Build ${buildId} started at agent on http://${agent.host}:${agent.port}`);
     } catch (error) {
       this.changeBuildAgentStatus(agent, AGENT_STATUS.WAITING);
+
       errorLog(`Failed starting build ${buildId} at agent on http://${agent.host}:${agent.port}`);
     }
   }
 
   changeBuildAgentStatus(agent, status) {
     const { port, host } = agent;
+
     this.agents.forEach((el) => {
       if (el.port === port && el.host === host) {
         el.status = status;
@@ -71,27 +83,43 @@ class BuildController {
 
   async fetchAgentStartBuild(agent, model) {
     const { port, host } = agent;
+
     const url = `http://${host}:${port}/build`;
+
     axios.post(url, model);
   }
 
   async fetchStorageBuildStart(buildId) {
-    await storageAPI.setBuildStart({
-      buildId,
-      dateTime: new Date().toISOString(),
-    });
+    try {
+      const startDate = Date.now();
+      await storageAPI.setBuildStart({
+        buildId,
+        dateTime: new Date(startDate).toISOString(),
+      });
+
+      this.timers[buildId] = { start: startDate };
+    } catch (error) {
+      errorLog(`Failed add to storage start info ${buildId}`);
+
+      setTimeout(() => {
+        this.fetchStorageBuildStart(buildId);
+      }, 1000);
+    }
   }
 
   async fetchStorageBuildFinish(buildId, status, log) {
     try {
+      const { start, finish } = this.timers[buildId];
+
       await storageAPI.setBuildFinish({
         buildId,
-        duration: 3000,
+        duration: finish - start,
         success: status === BUILD_STATUS.SUCCESS,
         buildLog: log,
       });
     } catch (error) {
       errorLog(`Error when add result for build ${buildId}`);
+
       setTimeout(() => {
         this.fetchStorageBuildFinish(buildId, status, log);
       }, 1000);
@@ -100,6 +128,7 @@ class BuildController {
 
   async fetchAgentHealth({ port, host }) {
     const url = `http://${host}:${port}/health`;
+
     return axios.get(url);
   }
 
@@ -112,10 +141,13 @@ class BuildController {
     if (agent) {
       try {
         await this.fetchAgentHealth(agent);
+
         return agent;
       } catch (error) {
         errorLog(`Build agent at http://${host}:${port} not response`);
+
         this.deleteAgent(agent);
+
         return false;
       }
     }
@@ -125,7 +157,7 @@ class BuildController {
   findWaitingBuilds(data) {
     return data.filter(
       (el) =>
-        el.status === BUILD_STATUS.WAITING && !this.buildList.find((item) => item.id === el.id)
+        el.status === BUILD_STATUS.WAITING && !this.buildList.find((item) => item.id === el.id),
     );
   }
 
@@ -141,7 +173,7 @@ class BuildController {
 
       infoLog(`Found ${waitingBuilds.length} new waiting builds`);
     } catch (error) {
-      infoLog('Error when getting build list. Try in 10 seconds');
+      errorLog('Error when getting build list. Try in 10 seconds');
     } finally {
       setTimeout(() => {
         this.getBuildList();
@@ -164,10 +196,11 @@ class BuildController {
 
         this.processBuilds();
       } else {
-        infoLog('User settings not found');
+        errorLog('User settings not found');
       }
     } catch (error) {
-      errorLog('Error in getting initial settings. Try get settings in 5 secocnds');
+      errorLog('Error in getting initial settings. Try get settings in 5 seconds');
+    } finally {
       setTimeout(() => {
         this.getSettings();
       }, 5000);
@@ -176,12 +209,15 @@ class BuildController {
 
   async start() {
     await this.getSettings();
+
     await this.getBuildList();
+
     infoLog('Build controller starting');
   }
 
   addAgent(port, host) {
     infoLog(`Add build agent at http://${host}:${port}`);
+
     if (this.agents.find((el) => el.port === port && el.host === host)) {
       this.changeBuildAgentStatus({ port, host }, AGENT_STATUS.WAITING);
     } else {
@@ -191,6 +227,7 @@ class BuildController {
 
   addBuildResult(buildId, status, log) {
     infoLog(`Add result for build ${buildId}`);
+    this.timers[buildId].finish = Date.now();
     this.fetchStorageBuildFinish(buildId, status, log);
   }
 }
