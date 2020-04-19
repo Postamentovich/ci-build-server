@@ -1,6 +1,20 @@
-const axios = require('axios').default;
-const { infoLog } = require('../utils/console-log');
-const { storageAPI } = require('../api/storage-api');
+const axios = require("axios").default;
+const { infoLog, errorLog } = require("../utils/console-log");
+const { storageAPI } = require("../api/storage-api");
+
+const BUILD_STATUS = {
+  WAITING: "Waiting",
+  IN_PROGRESS: "InProgress",
+  FAIL: "Fail",
+  CANCELED: "Canceled",
+  SUCCESS: "Success",
+};
+
+const AGENT_STATUS = {
+  WAITING: "Waiting",
+  TRYING: "Trying",
+  WORKING: "Working",
+};
 
 class BuildController {
   constructor() {
@@ -9,7 +23,7 @@ class BuildController {
     // Список доступных агентов
     this.agents = [];
 
-    this.processBuilds();
+    this.settings = null;
   }
 
   async processBuilds() {
@@ -18,8 +32,6 @@ class BuildController {
       const agent = this.getWaitingAgent();
 
       await this.startBuild(build, agent);
-
-      infoLog(`Build started at agent on ${agent.host}:${agent.port}`);
 
       this.processBuilds();
     } else {
@@ -30,11 +42,26 @@ class BuildController {
   }
 
   async startBuild(build, agent) {
-    const { buildId, repoName, commitHash, buildComand } = build;
-    const model = { buildId, repoName, commitHash, buildComand };
-    this.changeBuildAgentStatus(agent, 'Trying');
-    await this.fetchAgentStartBuild(agent, model);
-    this.changeBuildAgentStatus(agent, 'Working');
+    const { id: buildId, commitHash } = build;
+    const { repoName, buildCommand } = this.settings;
+    const model = { buildId, repoName, commitHash, buildCommand };
+    infoLog(this.buildList);
+    infoLog(
+      `Trying start build ${buildId} at agent on http://${agent.host}:${agent.port}`
+    );
+    this.changeBuildAgentStatus(agent, AGENT_STATUS.TRYING);
+    try {
+      await this.fetchAgentStartBuild(agent, model);
+      this.changeBuildAgentStatus(agent, AGENT_STATUS.WORKING);
+      infoLog(
+        `Build ${buildId} started at agent on http://${agent.host}:${agent.port}`
+      );
+    } catch (error) {
+      this.changeBuildAgentStatus(agent, AGENT_STATUS.WAITING);
+      errorLog(
+        `Failed starting build ${buildId} at agent on http://${agent.host}:${agent.port}`
+      );
+    }
   }
 
   changeBuildAgentStatus(agent, status) {
@@ -48,17 +75,19 @@ class BuildController {
 
   async fetchAgentStartBuild(agent, model) {
     const { port, host } = agent;
-    const url = `${host}:${port}`;
+    const url = `http://${host}:${port}/build`;
     axios.post(url, model);
   }
 
   getWaitingAgent() {
-    return this.agents.find((el) => el.status === 'Waiting');
+    return this.agents.find((el) => el.status === AGENT_STATUS.WAITING);
   }
 
   findWaitingBuilds(data) {
     return data.filter(
-      (el) => el.status === 'Waiting' && !this.buildList.find((item) => item.id === el.id),
+      (el) =>
+        el.status === BUILD_STATUS.WAITING &&
+        !this.buildList.find((item) => item.id === el.id)
     );
   }
 
@@ -74,14 +103,38 @@ class BuildController {
     infoLog(`Found ${waitingBuilds.length} waiting builds`);
   }
 
-  start() {
-    infoLog('Build controller starting');
-    this.getBuildList();
+  async getSettings() {
+    try {
+      infoLog("Get user settings");
+
+      const {
+        data: { data },
+      } = await storageAPI.getConfig();
+
+      if (data && data.repoName) {
+        infoLog("User settings found");
+
+        this.settings = data;
+      } else {
+        infoLog("User settings not found");
+      }
+    } catch (error) {
+      errorLog("Error in getting initial settings");
+    }
+  }
+
+  async start() {
+    await this.getSettings();
+    if (this.settings) {
+      infoLog("Build controller starting");
+      await this.getBuildList();
+      this.processBuilds();
+    }
   }
 
   addAgent(port, host) {
-    infoLog(`Add build agent at ${host}${port}`);
-    this.buildList.push({ port, host, status: 'Waiting' });
+    infoLog(`Add build agent at http://${host}:${port}`);
+    this.agents.push({ port, host, status: AGENT_STATUS.WAITING });
   }
 
   addBuildResult(buildId, status, log) {
