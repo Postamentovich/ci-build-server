@@ -7,6 +7,8 @@
 Сервер `cd server && npm ci && npm start` <br>
 Агент `cd agent && npm ci && npm start` <br>
 
+Репозиторий с клиентом - https://github.com/Postamentovich/shri-homework-1
+
 ### Описание проекта
 
 #### Сервер
