@@ -48,6 +48,7 @@ class AgentController {
       await this.run(command);
       infoLog(`Repo ${repoName} successfull clone`);
     } catch (error) {
+      errorLog(`${error}`);
       errorLog(`Clone Repo ${repoName} failed`);
     }
   }

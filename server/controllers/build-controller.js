@@ -45,7 +45,7 @@ class BuildController {
     } else {
       setTimeout(() => {
         this.processBuilds();
-      }, 5000);
+      }, 10000);
     }
   }
 
@@ -114,11 +114,13 @@ class BuildController {
 
       this.timers[buildId] = { start: startDate };
     } catch (error) {
+      errorLog(`${error}`);
       errorLog(`Failed add to storage start info ${buildId}`);
 
       setTimeout(() => {
-        this.fetchStorageBuildStart(buildId);
-      }, 3000);
+        const id = buildId;
+        this.fetchStorageBuildStart(id);
+      }, 5000);
     }
   }
 
@@ -133,11 +135,15 @@ class BuildController {
         buildLog: log,
       });
     } catch (error) {
+      errorLog(`${error}`);
       errorLog(`Error when add result for build ${buildId}`);
 
       setTimeout(() => {
-        this.fetchStorageBuildFinish(buildId, status, log);
-      }, 3000);
+        const _buildId = buildId;
+        const _status = status;
+        const _log = log;
+        this.fetchStorageBuildFinish(_buildId, _status, _log);
+      }, 5000);
     }
   }
 
@@ -159,7 +165,7 @@ class BuildController {
 
         return agent;
       } catch (error) {
-        errorLog(`Build agent at http://${host}:${port} not response`);
+        errorLog(`Build agent at http://${agent.host}:${agent.port} not response`);
 
         this.deleteAgent(agent);
 

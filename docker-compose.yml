@@ -1,0 +1,18 @@
+version: '3'
+
+services:
+  server:
+    build: server/
+    network_mode: host
+    command: node index.js
+    ports:
+      - 8080:8080
+
+  agent:
+    build: agent/
+    command: node index.js
+    network_mode: host
+    ports:
+      - 8001:8001
+    depends_on:
+      - server
