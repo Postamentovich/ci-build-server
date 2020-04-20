@@ -30,6 +30,10 @@ class BuildController {
 
   async processBuilds() {
     const hasWaitingAgent = await this.getWaitingAgent();
+    infoLog(`Builds in queue ${this.buildList.length}`);
+    infoLog(
+      `Agents is waiting ${this.agents.filter((el) => el.status === AGENT_STATUS.WAITING).length}`,
+    );
 
     if (this.buildList[0] && hasWaitingAgent) {
       const build = this.buildList.shift();
@@ -41,42 +45,53 @@ class BuildController {
     } else {
       setTimeout(() => {
         this.processBuilds();
-      }, 3000);
+      }, 5000);
     }
   }
 
   async startBuild(build, agent) {
     const { id: buildId, commitHash } = build;
 
-    const { repoName, buildCommand } = this.settings;
-
-    const model = { buildId, repoName, commitHash, buildCommand };
-
     infoLog(`Trying start build ${buildId} at agent on http://${agent.host}:${agent.port}`);
 
     this.changeBuildAgentStatus(agent, AGENT_STATUS.TRYING);
 
     try {
-      await this.fetchAgentStartBuild(agent, model);
+      const settings = await this.getSettings();
 
-      this.changeBuildAgentStatus(agent, AGENT_STATUS.WORKING);
+      if (settings && settings.repoName && settings.buildCommand) {
+        const { repoName, buildCommand } = settings;
 
-      await this.fetchStorageBuildStart(buildId);
+        const model = { buildId, repoName, commitHash, buildCommand };
 
-      infoLog(`Build ${buildId} started at agent on http://${agent.host}:${agent.port}`);
+        await this.fetchAgentStartBuild(agent, model);
+
+        this.changeBuildAgentStatus(agent, AGENT_STATUS.WORKING, build);
+
+        await this.fetchStorageBuildStart(buildId);
+
+        infoLog(`Build ${buildId} started at agent on http://${agent.host}:${agent.port}`);
+      } else {
+        this.changeBuildAgentStatus(agent, AGENT_STATUS.WAITING);
+
+        this.buildList.push(build);
+      }
     } catch (error) {
       this.changeBuildAgentStatus(agent, AGENT_STATUS.WAITING);
+
+      this.buildList.push(build);
 
       errorLog(`Failed starting build ${buildId} at agent on http://${agent.host}:${agent.port}`);
     }
   }
 
-  changeBuildAgentStatus(agent, status) {
+  changeBuildAgentStatus(agent, status, build = null) {
     const { port, host } = agent;
 
     this.agents.forEach((el) => {
       if (el.port === port && el.host === host) {
         el.status = status;
+        el.build = build;
       }
     });
   }
@@ -103,7 +118,7 @@ class BuildController {
 
       setTimeout(() => {
         this.fetchStorageBuildStart(buildId);
-      }, 1000);
+      }, 3000);
     }
   }
 
@@ -122,7 +137,7 @@ class BuildController {
 
       setTimeout(() => {
         this.fetchStorageBuildFinish(buildId, status, log);
-      }, 1000);
+      }, 3000);
     }
   }
 
@@ -161,6 +176,12 @@ class BuildController {
     );
   }
 
+  addBuildToQueue(build) {
+    if (!this.buildList.find((el) => el.id !== build.id)) {
+      this.buildList.push(build);
+    }
+  }
+
   async getBuildList() {
     try {
       const {
@@ -169,7 +190,9 @@ class BuildController {
 
       const waitingBuilds = this.findWaitingBuilds(data);
 
-      this.buildList = [...this.buildList, ...waitingBuilds];
+      waitingBuilds.forEach((build) => {
+        this.addBuildToQueue(build);
+      });
 
       infoLog(`Found ${waitingBuilds.length} new waiting builds`);
     } catch (error) {
@@ -192,25 +215,40 @@ class BuildController {
       if (data && data.repoName) {
         infoLog('User settings found');
 
-        this.settings = data;
-
-        this.processBuilds();
+        return data;
       } else {
         errorLog('User settings not found');
+        return null;
       }
     } catch (error) {
       errorLog('Error in getting initial settings. Try get settings in 5 seconds');
-    } finally {
-      setTimeout(() => {
-        this.getSettings();
-      }, 5000);
+      return null;
     }
   }
 
-  async start() {
-    await this.getSettings();
+  async agentHealthChecking() {
+    for (let i = 0; i < this.agents.length; i++) {
+      const agent = this.agents[i];
+      try {
+        await this.fetchAgentHealth(agent);
+      } catch (error) {
+        this.deleteAgent(agent);
+        if (agent.status === AGENT_STATUS.WORKING && agent.build) {
+          this.buildList.push(agent.build);
+        }
+      }
+    }
+    setTimeout(() => {
+      this.agentHealthChecking();
+    }, 10000);
+  }
 
+  async start() {
     await this.getBuildList();
+
+    this.processBuilds();
+
+    this.agentHealthChecking();
 
     infoLog('Build controller starting');
   }
