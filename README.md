@@ -22,6 +22,8 @@
 Сервер `cd server && npm ci && npm start` <br>
 Агент `cd agent && npm ci && npm start` <br>
 
+Одновременно сервер и агент можно запустить в докере командой `npm run docker-compose` <br>
+
 Репозиторий с клиентом - https://github.com/Postamentovich/shri-homework-1
 
 ## Сервер
