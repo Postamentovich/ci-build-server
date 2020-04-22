@@ -1,60 +1,99 @@
-const axios = require('axios').default;
-const { infoLog, errorLog } = require('../utils/console-log');
-const { storageAPI } = require('../api/storage-api');
+// tslint:disable: variable-name
+import axios from 'axios';
+import { storageAPI } from '../api/storage-api';
+import { errorLog, infoLog } from '../utils/console-log';
+import { IBuildModel, AgentStatus, BuildStatus, IBuildResult } from './../models';
 
-const BUILD_STATUS = {
-  WAITING: 'Waiting',
-  IN_PROGRESS: 'InProgress',
-  FAIL: 'Fail',
-  CANCELED: 'Canceled',
-  SUCCESS: 'Success',
-};
+export interface IAgent {
+  status: AgentStatus;
+  port: number;
+  host: string;
+  build?: IBuildModel;
+}
 
-const AGENT_STATUS = {
-  WAITING: 'Waiting',
-  TRYING: 'Trying',
-  WORKING: 'Working',
-};
+export interface IAgentTimers {
+  [key: string]: { start?: number; finish?: number };
+}
 
-class BuildController {
-  constructor() {
-    // Список билдов в очереди
-    this.buildList = [];
-    // Список доступных агентов
-    this.agents = [];
-    // Настройки репозитория
-    this.settings = null;
-    // Объект в котором по ключу билда хранятся время начала и конца сборки
-    this.timers = {};
+export interface IAgentStartBuild {
+  buildId: string;
+  repoName: string;
+  commitHash: string;
+  buildCommand: string;
+}
+
+export default class BuildController {
+  // Список билдов в очереди
+  private buildList: IBuildModel[] = [];
+  // Список доступных агентов
+  private agents: IAgent[] = [];
+  // Объект в котором по ключу билда хранятся время начала и конца сборки
+  private timers: IAgentTimers = {};
+  // Таймаут перзапроса
+  private retryTimeout = 10000;
+
+  public async start() {
+    await this.getBuildList();
+
+    this.processBuilds();
+
+    this.agentHealthChecking();
+
+    infoLog('Build controller starting');
   }
 
-  async processBuilds() {
+  public addAgent(port: number, host: string) {
+    infoLog(`Add build agent at http://${host}:${port}`);
+
+    const agent = this.agents.find((el) => el.port === port && el.host === host);
+
+    if (agent) {
+      this.changeBuildAgentStatus(agent, AgentStatus.Waiting);
+    } else {
+      this.agents.push({ port, host, status: AgentStatus.Waiting });
+    }
+  }
+
+  public addBuildResult(buildId: string, status: BuildStatus, log: string) {
+    infoLog(`Add result for build ${buildId}`);
+
+    this.timers[buildId].finish = Date.now();
+
+    this.fetchStorageBuildFinish(buildId, status, log);
+  }
+
+  private async processBuilds() {
     const hasWaitingAgent = await this.getWaitingAgent();
+
     infoLog(`Builds in queue ${this.buildList.length}`);
+
     infoLog(
-      `Agents is waiting ${this.agents.filter((el) => el.status === AGENT_STATUS.WAITING).length}`,
+      `Agents pending ${this.agents.filter((el) => el.status === AgentStatus.Waiting).length}`,
     );
 
     if (this.buildList[0] && hasWaitingAgent) {
       const build = this.buildList.shift();
+
       const agent = await this.getWaitingAgent();
 
-      await this.startBuild(build, agent);
+      if (agent && build) {
+        await this.startBuild(build, agent);
+      }
 
       this.processBuilds();
     } else {
       setTimeout(() => {
         this.processBuilds();
-      }, 10000);
+      }, this.retryTimeout);
     }
   }
 
-  async startBuild(build, agent) {
+  private async startBuild(build: IBuildModel, agent: IAgent) {
     const { id: buildId, commitHash } = build;
 
     infoLog(`Trying start build ${buildId} at agent on http://${agent.host}:${agent.port}`);
 
-    this.changeBuildAgentStatus(agent, AGENT_STATUS.TRYING);
+    this.changeBuildAgentStatus(agent, AgentStatus.Trying);
 
     try {
       const settings = await this.getSettings();
@@ -62,22 +101,22 @@ class BuildController {
       if (settings && settings.repoName && settings.buildCommand) {
         const { repoName, buildCommand } = settings;
 
-        const model = { buildId, repoName, commitHash, buildCommand };
+        const model: IAgentStartBuild = { buildId, repoName, commitHash, buildCommand };
 
         await this.fetchAgentStartBuild(agent, model);
 
-        this.changeBuildAgentStatus(agent, AGENT_STATUS.WORKING, build);
+        this.changeBuildAgentStatus(agent, AgentStatus.Waiting, build);
 
         await this.fetchStorageBuildStart(buildId);
 
         infoLog(`Build ${buildId} started at agent on http://${agent.host}:${agent.port}`);
       } else {
-        this.changeBuildAgentStatus(agent, AGENT_STATUS.WAITING);
+        this.changeBuildAgentStatus(agent, AgentStatus.Waiting);
 
         this.buildList.push(build);
       }
     } catch (error) {
-      this.changeBuildAgentStatus(agent, AGENT_STATUS.WAITING);
+      this.changeBuildAgentStatus(agent, AgentStatus.Waiting);
 
       this.buildList.push(build);
 
@@ -85,7 +124,7 @@ class BuildController {
     }
   }
 
-  changeBuildAgentStatus(agent, status, build = null) {
+  private changeBuildAgentStatus(agent: IAgent, status: AgentStatus, build?: IBuildModel) {
     const { port, host } = agent;
 
     this.agents.forEach((el) => {
@@ -96,15 +135,15 @@ class BuildController {
     });
   }
 
-  async fetchAgentStartBuild(agent, model) {
+  private async fetchAgentStartBuild(agent: IAgent, model: IAgentStartBuild) {
     const { port, host } = agent;
 
     const url = `http://${host}:${port}/build`;
 
-    axios.post(url, model);
+    await axios.post(url, model);
   }
 
-  async fetchStorageBuildStart(buildId) {
+  private async fetchStorageBuildStart(buildId: string) {
     try {
       const startDate = Date.now();
       await storageAPI.setBuildStart({
@@ -120,19 +159,19 @@ class BuildController {
       setTimeout(() => {
         const id = buildId;
         this.fetchStorageBuildStart(id);
-      }, 5000);
+      }, this.retryTimeout);
     }
   }
 
-  async fetchStorageBuildFinish(buildId, status, log) {
+  private async fetchStorageBuildFinish(buildId: string, status: BuildStatus, log: string) {
     try {
       const { start, finish } = this.timers[buildId];
 
       await storageAPI.setBuildFinish({
         buildId,
-        duration: finish - start,
-        success: status === BUILD_STATUS.SUCCESS,
         buildLog: log,
+        duration: finish! - start!,
+        success: status === BuildStatus.Success,
       });
     } catch (error) {
       errorLog(`${error}`);
@@ -143,22 +182,22 @@ class BuildController {
         const _status = status;
         const _log = log;
         this.fetchStorageBuildFinish(_buildId, _status, _log);
-      }, 5000);
+      }, this.retryTimeout);
     }
   }
 
-  async fetchAgentHealth({ port, host }) {
+  private async fetchAgentHealth({ port, host }: IAgent) {
     const url = `http://${host}:${port}/health`;
 
     return axios.get(url);
   }
 
-  deleteAgent({ port, host }) {
+  private deleteAgent({ port, host }: IAgent) {
     this.agents = this.agents.filter((el) => el.port !== port && el.host !== host);
   }
 
-  async getWaitingAgent() {
-    const agent = this.agents.find((el) => el.status === AGENT_STATUS.WAITING);
+  private async getWaitingAgent() {
+    const agent = this.agents.find((el) => el.status === AgentStatus.Waiting);
     if (agent) {
       try {
         await this.fetchAgentHealth(agent);
@@ -175,22 +214,23 @@ class BuildController {
     return false;
   }
 
-  findWaitingBuilds(data) {
+  private findWaitingBuilds(data: IBuildModel[]) {
     return data.filter(
       (el) =>
-        el.status === BUILD_STATUS.WAITING && !this.buildList.find((item) => item.id === el.id),
+        el.status === BuildStatus.Waiting && !this.buildList.find((item) => item.id === el.id),
     );
   }
 
-  addBuildToQueue(build) {
+  private addBuildToQueue(build: IBuildModel) {
     if (!this.buildList.find((el) => el.id !== build.id)) {
       this.buildList.push(build);
     }
   }
 
-  async getBuildList() {
+  private async getBuildList() {
     try {
       const {
+        // @ts-ignore
         data: { data },
       } = await storageAPI.getBuildList();
 
@@ -206,11 +246,11 @@ class BuildController {
     } finally {
       setTimeout(() => {
         this.getBuildList();
-      }, 10000);
+      }, this.retryTimeout);
     }
   }
 
-  async getSettings() {
+  private async getSettings() {
     try {
       infoLog('Get user settings');
 
@@ -232,48 +272,21 @@ class BuildController {
     }
   }
 
-  async agentHealthChecking() {
+  private async agentHealthChecking() {
+    // tslint:disable-next-line: prefer-for-of
     for (let i = 0; i < this.agents.length; i++) {
       const agent = this.agents[i];
       try {
         await this.fetchAgentHealth(agent);
       } catch (error) {
         this.deleteAgent(agent);
-        if (agent.status === AGENT_STATUS.WORKING && agent.build) {
+        if (agent.status === AgentStatus.Working && agent.build) {
           this.buildList.push(agent.build);
         }
       }
     }
     setTimeout(() => {
       this.agentHealthChecking();
-    }, 10000);
-  }
-
-  async start() {
-    await this.getBuildList();
-
-    this.processBuilds();
-
-    this.agentHealthChecking();
-
-    infoLog('Build controller starting');
-  }
-
-  addAgent(port, host) {
-    infoLog(`Add build agent at http://${host}:${port}`);
-
-    if (this.agents.find((el) => el.port === port && el.host === host)) {
-      this.changeBuildAgentStatus({ port, host }, AGENT_STATUS.WAITING);
-    } else {
-      this.agents.push({ port, host, status: AGENT_STATUS.WAITING });
-    }
-  }
-
-  addBuildResult(buildId, status, log) {
-    infoLog(`Add result for build ${buildId}`);
-    this.timers[buildId].finish = Date.now();
-    this.fetchStorageBuildFinish(buildId, status, log);
+    }, this.retryTimeout);
   }
 }
-
-module.exports = BuildController;

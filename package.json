@@ -2,7 +2,7 @@
   "name": "shri-ci-build",
   "version": "1.0.0",
   "description": "Домашнее задание - Инфраструктура",
-  "main": "index.js",
+  "main": "index.ts",
   "scripts": {
     "server": "npm run start --prefix server",
     "agent": "npm run start --prefix agent",

@@ -4,13 +4,13 @@ services:
   server:
     build: server/
     network_mode: host
-    command: node index.js
+    command: npm run start
     ports:
       - 8080:8080
 
   agent:
     build: agent/
-    command: node index.js
+    command: npm run start
     network_mode: host
     ports:
       - 8001:8001
