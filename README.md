@@ -22,6 +22,8 @@
 
 Одновременно сервер и агент можно запустить в докере командой `npm run docker-compose` <br>
 
+Версия Node.js - 12.16 <br/>
+
 Репозиторий с клиентом - https://github.com/Postamentovich/shri-homework-1
 
 ## Сервер
@@ -32,7 +34,8 @@
 
 ### Конфигурация
 
-В папку `/server` нужно положить файл конфигурации server-conf.json в формате:
+В папку `/server` нужно положить файл конфигурации server-conf.json в формате: <br/>
+apiToken - токен авторизации https://hw.shri.yandex/</br>
 
 ```json
 {
